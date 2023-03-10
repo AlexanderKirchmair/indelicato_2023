@@ -1,0 +1,99 @@
+---
+title: "00_Preprocessing_Results"
+author: "Alexander Kirchmair"
+---
+
+```{r setup}
+# renv::init(project = "../", bioconductor = "3.14")
+renv::restore()
+
+library(renv)
+library(tidyverse)
+library(DESeq2)
+library(msigdbr)
+library(fgsea)
+library(clusterProfiler)
+library(openxlsx)
+library(ggplot2)
+library(ggrepel)
+library(org.Hs.eg.db)
+
+if (!exists("envfrda")){
+  envfrda <- new.env()
+  list.files("../lib", full.names = TRUE, pattern = "^r-.*R") |>
+    sapply(source, local = envfrda) |> invisible()
+  attach(envfrda)  
+}
+
+# renv::snapshot(project = "../")
+
+dir.create("../data/FRDA_04_ANALYSIS", showWarnings = FALSE)
+```
+
+
+Data import
+```{r}
+if (!exists("FRDA")){
+  FRDA <- list()
+}
+
+FRDA$colors <- list(group = c(CTRL = "#39a7bf", FRDA = "#f58d1d", EPO = "#a11b1b"))
+
+FRDA$design <- read.csv("../tables/samplesheet.csv")
+FRDA$design %<>% dplyr::select(-c(fastq_1, fastq_2, strandedness, RIN)) %>% unique()
+FRDA$design %<>% mutate(donor = as.character(donor))
+rownames(FRDA$design) <- FRDA$design$sample
+
+FRDA$txi <- nf_import("../data/FRDA_03_NF_RESULTS")
+FRDA$summary <- nf_summary("../data/FRDA_03_NF_RESULTS", design = FRDA$design)
+FRDA$design <- FRDA$design[colnames(FRDA$txi$counts), ]
+
+FRDA$summary$data$raw |> mean()
+mean(FRDA$summary$data$mapped)/mean(FRDA$summary$data$raw)
+mean(FRDA$summary$data$exon)/mean(FRDA$summary$data$raw)
+```
+
+
+Protein-coding genes
+```{r}
+FRDA$genes <- data.frame(symbol = keys(org.Hs.eg.db, keytype = "SYMBOL"))
+FRDA$genes$type <- mapIds(org.Hs.eg.db, keys = FRDA$genes$symbol,
+                          keytype = "SYMBOL", column = "GENETYPE",
+                          multiVals = function(x){ paste0(x, collapse = "|") })
+
+FRDA$genes$protein <- grepl("protein-coding", FRDA$genes$type)
+FRDA$genes <- subset(FRDA$genes, symbol %in% rownames(FRDA$txi$counts))
+FRDA$protein_coding <- FRDA$genes %>% subset(protein) %>% pull(symbol)
+```
+
+
+Normalized counts
+```{r}
+FRDA$dds <- runDESeq2(FRDA$txi$counts, design = FRDA$design, formula = ~ 1)$dds
+FRDA$lognorm <- log2(counts(FRDA$dds, normalized = TRUE) + 1)
+```
+
+
+PCA plot
+```{r}
+pca_df <- FRDA$design
+pca_df$group[pca_df$group == "FRDA_EPO"] <- "EPO"
+pca_df$group <- factor(pca_df$group, ordered = TRUE, levels = c("CTRL", "FRDA", "EPO"))
+pca_df$sample <- sub("FRDA_", "", pca_df$sample)
+
+FRDA$plots$pca_topn <- ggpca(FRDA$lognorm, design = pca_df, mapping = aes(color = group, label = sample), colors = FRDA$colors, n = 500) + geom_text_repel()
+```
+
+
+Write matrix of raw counts
+```{r}
+cols <- FRDA$design |> dplyr::arrange(treatment) |> pull(sample)
+FRDA$txi$counts[,cols] |> rownames2col(col = Gene) |> write.csv(file = "../data/raw_counts.csv", quote = F, row.names = F)
+```
+
+
+Save data
+```{r}
+saveRDS(FRDA, file = "../data/FRDA_04_ANALYSIS/00_FRDA.rds")
+```
+

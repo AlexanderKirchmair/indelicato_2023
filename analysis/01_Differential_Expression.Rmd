@@ -1,0 +1,167 @@
+---
+title: "01_Differential_Expression"
+author: "Alexander Kirchmair"
+---
+
+```{r setup}
+renv::restore()
+
+library(renv)
+library(tidyverse)
+library(DESeq2)
+library(msigdbr)
+library(fgsea)
+library(clusterProfiler)
+library(openxlsx)
+library(ggplot2)
+library(ggrepel)
+library(org.Hs.eg.db)
+
+if (!exists("envfrda")){
+  envfrda <- new.env()
+  list.files("../lib", full.names = TRUE, pattern = "^r-.*R") |>
+    sapply(source, local = envfrda) |> invisible()
+  attach(envfrda)  
+}
+
+# renv::snapshot(project = "../")
+
+dir.create("../data/FRDA_04_ANALYSIS", showWarnings = FALSE)
+```
+
+
+Data import
+```{r}
+FRDA <- readRDS(file = "../data/FRDA_04_ANALYSIS/00_FRDA.rds")
+FRDA$txi$counts <- FRDA$txi$counts[FRDA$protein_coding,]
+```
+
+
+Differential expression: FRDA (and FRDA-EPO) vs. control
+```{r}
+FRDA$deseq2_frda <- runDESeq2(data = FRDA$txi$counts,
+                              sizefactors = FRDA$dds$sizeFactor,
+                              design =  FRDA$design,
+                              formula = ~ group,
+                              contrasts = list(FRDAvsCTRL = c("group", "FRDA", "CTRL"),
+                                               EPOvsCTRL = c("group", "FRDA_EPO", "CTRL")))
+```
+
+
+Differential expression: Post-EPO vs. pre-EPO
+```{r}
+FRDA$deseq2_epo <- runDESeq2(data = FRDA$txi$counts[, subset(FRDA$design, condition == "frda")$sample],
+                             sizefactors = FRDA$dds$sizeFactor[subset(FRDA$design, condition == "frda")$sample],
+                             design =  subset(FRDA$design, condition == "frda"),
+                             formula = ~ group + donor,
+                             contrasts = list(EPOvsFRDA = c("group", "FRDA_EPO", "FRDA")))
+```
+
+
+Volcano plots
+```{r}
+FRDA$plots$volcano$FRDAvsCTRL <- FRDA$deseq2_frda$results$FRDAvsCTRL %>%
+  ggvolcano(xlim = c(-8,8), ylim = c(0, 14), lab_size = 10, lab_ix = "none", point_size = 1.8, repel = 10, max_overlaps = 15, box.padding = 0.55)
+
+FRDA$plots$volcano$EPOvsFRDA <- FRDA$deseq2_epo$results$EPOvsFRDA %>%
+  ggvolcano(xlim = c(-8,8), ylim = c(0, 7), lab_size = 10, lab_ix = "none", point_size = 1.8, repel = 1, max_overlaps = 10, box.padding = 0.65)
+```
+
+
+FXN expression plot
+```{r}
+expr <- data.frame(FRDA$design, FXN = FRDA$lognorm["FXN",FRDA$design$sample])
+expr$group[expr$group == "FRDA_EPO"] <- "EPO"
+expr$group <- factor(expr$group, ordered = TRUE, levels = c("CTRL", "FRDA", "EPO"))
+
+gg <- ggplot(expr, aes(group, FXN, label = donor)) +
+  theme_basic() +
+  geom_boxplot(fill = NA) +
+  geom_point() +
+  geom_line(aes(group = donor), linetype = "dashed") +
+  ylab("FXN expr.") + xlab("") + ylim(c(0,7.5)) +
+  geom_text_repel(data = subset(expr, group != "FRDA"), nudge_x = 0.1, color = "red", max.overlaps = Inf)
+
+statdf <- expand.grid(unique(expr$group), unique(expr$group)) |> apply(1, sort) |> t()
+l <- statdf |> apply(1, unique) |> sapply(length)
+statdf <- unique(statdf[l == 2,]) |> data.frame()
+colnames(statdf) <- c("x","xend")
+
+statdf$p <- NA
+statdf$comparison <- paste0(statdf$xend,"vs",statdf$x)
+statdf$p[statdf$comparison == "FRDAvsCTRL"] <- FRDA$deseq2_frda$results$FRDAvsCTRL["FXN",]$padj
+statdf$p[statdf$comparison == "EPOvsCTRL"] <- FRDA$deseq2_frda$results$EPOvsCTRL["FXN",]$padj
+statdf$p[statdf$comparison == "FRDAvsEPO"] <- FRDA$deseq2_epo$results$EPOvsFRDA["FXN",]$padj
+
+x <- union(statdf$x,statdf$xend)
+xlev <- setNames(as.numeric(factor(x, ordered = TRUE, levels = c("CTRL", "FRDA", "EPO"))), x)
+statdf$dist <- abs(xlev[statdf$x] - xlev[statdf$xend])
+statdf$yoffset <- rank(statdf$dist, ties.method = "random") |> scale(center = TRUE) |> as.numeric()
+statdf$y <- max(expr$FXN) * 1.5
+statdf$y <- statdf$y + statdf$y*0.15*statdf$yoffset
+ydist <- as.numeric(dist(c(min(0, expr$FXN),max(statdf$y))))
+
+statdf$text <- pval_format(statdf$p)
+statdf$text[grepl("p>0.9",statdf$text)] <- "p=1"
+statdf$xmean <- rowMeans(cbind(xlev[statdf$x], xlev[statdf$xend]))
+
+ar <- grid::arrow(90, length = grid::unit(0.01,"npc"), ends = "both")
+
+FRDA$plots$FXN <- gg +
+  geom_segment(data = statdf, mapping = aes(x = x, xend = xend, y = y, yend = y), arrow = ar, inherit.aes = FALSE) +
+  ylim(c(0,max(statdf$y) * 1.2)) +
+  geom_text(data = statdf, mapping = aes(x = xmean, y = y, label = text), nudge_y = ydist*0.05, inherit.aes = FALSE, size = 14/ggplot2::.pt)
+```
+
+
+LEP expression plot
+```{r}
+expr <- data.frame(FRDA$design, LEP = FRDA$lognorm["LEP",FRDA$design$sample])
+expr$group[expr$group == "FRDA_EPO"] <- "EPO"
+expr$group <- factor(expr$group, ordered = TRUE, levels = c("CTRL", "FRDA", "EPO"))
+
+gg <- ggplot(expr, aes(group, LEP, label = donor)) + 
+  theme_basic() + 
+  geom_boxplot(fill = NA) + 
+  geom_point() +
+  geom_line(aes(group = donor), linetype = "dashed") + 
+  ylab("LEP expr.") + xlab("") + ylim(c(0,7.5)) +
+  geom_text_repel(data = subset(expr, group != "FRDA"), nudge_x = 0.1, color = "red", max.overlaps = Inf)
+
+statdf <- expand.grid(unique(expr$group), unique(expr$group)) |> apply(1, sort) |> t()
+l <- statdf |> apply(1, unique) |> sapply(length)
+statdf <- unique(statdf[l == 2,]) |> data.frame()
+colnames(statdf) <- c("x","xend")
+
+statdf$p <- NA
+statdf$comparison <- paste0(statdf$xend,"vs",statdf$x)
+statdf$p[statdf$comparison == "FRDAvsCTRL"] <- FRDA$deseq2_frda$results$FRDAvsCTRL["LEP",]$padj
+statdf$p[statdf$comparison == "EPOvsCTRL"] <- FRDA$deseq2_frda$results$EPOvsCTRL["LEP",]$padj
+statdf$p[statdf$comparison == "FRDAvsEPO"] <- FRDA$deseq2_epo$results$EPOvsFRDA["LEP",]$padj
+x <- union(statdf$x,statdf$xend)
+xlev <- setNames(as.numeric(factor(x, ordered = TRUE, levels = c("CTRL", "FRDA", "EPO"))), x)
+statdf$dist <- abs(xlev[statdf$x] - xlev[statdf$xend])
+statdf$yoffset <- rank(statdf$dist, ties.method = "random") |> scale(center = TRUE) |> as.numeric()
+statdf$y <- max(expr$LEP) * 1.5
+statdf$y <- statdf$y + statdf$y*0.15*statdf$yoffset
+ydist <- as.numeric(dist(c(min(0, expr$LEP),max(statdf$y))))
+statdf$text <- pval_format(statdf$p)
+statdf$text[grepl("p>0.9",statdf$text)] <- "p=1"
+statdf$xmean <- rowMeans(cbind(xlev[statdf$x], xlev[statdf$xend]))
+
+ar <- grid::arrow(90, length = grid::unit(0.01,"npc"), ends = "both")
+
+FRDA$plots$LEP <- gg +
+  geom_segment(data = statdf, mapping = aes(x = x, xend = xend, y = y, yend = y), arrow = ar, inherit.aes = FALSE) +
+  ylim(c(0,max(statdf$y) * 1.2)) +
+  geom_text(data = statdf, mapping = aes(x = xmean, y = y, label = text), nudge_y = ydist*0.05, inherit.aes = FALSE, size = 14/ggplot2::.pt)
+
+FRDA$plots$LEP <- FRDA$plots$LEP + theme(axis.line.x = element_line(lineend = "square"))
+```
+
+
+Save data
+```{r}
+saveRDS(FRDA, file = "../data/FRDA_04_ANALYSIS/01_FRDA.rds")
+```
+

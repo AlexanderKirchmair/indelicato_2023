@@ -1,0 +1,226 @@
+---
+title: "03_Figures"
+author: "Alexander Kirchmair"
+params:
+  dir:    "../results"
+---
+
+```{r setup, include=FALSE}
+renv::restore()
+
+library(renv)
+library(ggplot2)
+library(ggrepel)
+library(ggpubr)
+library(patchwork)
+
+if (!exists("envfrda")){
+  envfrda <- new.env()
+  list.files("../lib", full.names = TRUE, pattern = "^r-.*R") |>
+    sapply(source, local = envfrda) |> invisible()
+  attach(envfrda)  
+} else {
+  attach(envfrda) 
+}
+
+# renv::snapshot(project = "../")
+
+dir.create(params$dir, showWarnings = FALSE)
+```
+
+
+Data import
+```{r}
+FRDA <- readRDS(file = "../data/FRDA_04_ANALYSIS/02_FRDA.rds")
+```
+
+
+Plotting parameters
+```{r}
+axis.text.fontsize <- 14
+axis.title.fontsize <- 16
+
+theme_fig <- theme(text = element_text(),
+                   plot.margin = margin(8, 8, 8, 8),
+                   panel.spacing = unit(0, "pt"),
+                   legend.margin = margin(5, 0, 5, 5),
+                   axis.text.x = element_text(size = axis.text.fontsize),
+                   axis.text.y = element_text(size = axis.text.fontsize),
+                   axis.title.x = element_text(size = axis.title.fontsize, face = "plain"),
+                   axis.title.y = element_text(size = axis.title.fontsize, face = "plain"),
+                   plot.tag = element_text(size = 18, hjust = 0, vjust = 1, margin = margin(), face = "bold"))
+
+colorscale_bw <- scale_fill_gradientn(colours = c("grey50", "white", "grey50"), breaks = c(-2,-1,0,1,2), limits = c(-2.5,2.5), oob = scales::squish)
+```
+
+
+Numbers
+```{r}
+# FRDA
+FRDA$deseq2_frda$results$FRDAvsCTRL |> subset(padj <= 0.05) |> nrow()
+FRDA$deseq2_frda$results$FRDAvsCTRL |> subset(padj <= 0.05 & log2FoldChange > 0) |> nrow()
+FRDA$deseq2_frda$results$FRDAvsCTRL |> subset(padj <= 0.05 & log2FoldChange < 0) |> nrow()
+
+FRDA$gsea_frda |> as.data.frame() |> subset(p.adjust <= 0.05) |> nrow()
+FRDA$gsea_frda |> as.data.frame() |> subset(p.adjust <= 0.05 & NES > 0) |> nrow()
+FRDA$gsea_frda |> as.data.frame() |> subset(p.adjust <= 0.05 & NES < 0) |> nrow()
+
+# EPO
+FRDA$deseq2_epo$results$EPOvsFRDA |> subset(padj <= 0.05) |> nrow()
+FRDA$deseq2_epo$results$EPOvsFRDA |> subset(padj <= 0.05 & log2FoldChange > 0) |> nrow()
+FRDA$deseq2_epo$results$EPOvsFRDA |> subset(padj <= 0.05 & log2FoldChange < 0) |> nrow()
+```
+
+
+Table S1: Differentially expressed genes
+```{r}
+nameslib <- rownames(FRDA$txi$counts) |> convertGeneIDs(from = "SYMBOL",to = "GENENAME")
+cols <- c("gene", "baseMean", "log2FoldChange", "pvalue", "padj")
+
+TableS1 <- list(
+  FRDAvsCTRL = FRDA$deseq2_frda$results$FRDAvsCTRL[,cols] |> dplyr::rename(mean = baseMean),
+  EPOvsFRDA = FRDA$deseq2_epo$results$EPOvsFRDA[,cols] |> dplyr::rename(mean = baseMean)
+) |> lapply(FUN = function(x){ dplyr::mutate(x, description = nameslib[gene]) })
+
+TableS1 |> lapply(FUN = function(x){ dplyr::arrange(x, padj, pvalue) }) |>
+  writeTables(rowNames = FALSE, file = file.path(params$dir, "TableS1.xlsx"))
+```
+
+
+Table S2: GSEA pathway analysis
+```{r}
+cols <- c("ID", "enrichmentScore", "NES","pvalue", "p.adjust", "setSize")
+
+FRDA_msigdb <- subset(as.data.frame(FRDA$gsea_frda)[,cols], p.adjust <= 0.15) |>
+  dplyr::rename("Gene set" = ID, ES = enrichmentScore, padj = p.adjust, "gene set size" = setSize)
+EPO_msigdb <- subset(as.data.frame(FRDA$gsea_epo)[,cols], p.adjust <= 0.15) |>
+  dplyr::rename("Gene set" = ID, ES = enrichmentScore, padj = p.adjust, "gene set size" = setSize)
+
+list(FRDA_msigdb = FRDA_msigdb, EPO_msigdb = EPO_msigdb) |> 
+  writeTables(rowNames = FALSE, file = file.path(params$dir, "TableS2.xlsx"))
+```
+
+
+Figure 1: Transcriptomic analysis
+```{r}
+df <- subset(FRDA$design, treatment == "control")[,c("sample", "donor", "sex", "age")]
+df$GAA1 <- c("","","","","","", 350,150,240,1000,850,850,650)
+A=df %>%
+  ggtexttable(rows = NULL, theme = ttheme(base_size = 10, padding = unit(c(20*0.2, 15*0.3), "pt"), tbody.style = tbody_style(size = 8)))
+
+D=FRDA$plots$FXN + theme(axis.line.x = element_line(lineend = "square"))
+C=FRDA$plots$volcano$FRDAvsCTRL + theme(legend.position = "none") + theme(axis.line.x = element_line(lineend = "square"))
+
+B=FRDA$plots$pca_topn + theme(legend.title = element_blank(), legend.text = element_text(size = 12)) +
+  coord_equal() + theme(axis.line.x = element_line(lineend = "square"))
+E=FRDA$plots$volcano$EPOvsFRDA + theme(legend.position = "none", axis.line.x = element_line(lineend = "square"))
+
+A <- A + theme(panel.spacing = unit(0, "pt"), axis.line.x = element_blank(), axis.line.y = element_blank(), axis.title.x = element_blank(),
+               axis.title.y = element_blank(), legend.background = element_blank(), panel.background = element_blank(),
+               panel.spacing.x = unit(0, "pt"), panel.spacing.y = unit(0, "pt"), plot.margin = margin(0.5,0,0,0))
+
+A <- wrap_plots(A, plot_spacer(), widths = c(1, 1.2), nrow = 1)
+p1 <- wrap_plots(A, B, D, plot_spacer(), nrow = 1, widths = c(0.4, 0.8, 0.8, 0.01))
+p2 <- wrap_plots(C, E, plot_spacer(), nrow = 1, widths = c(1, 1, 0.01), guides = "keep")
+Fig1 <- wrap_plots(p1, p2, nrow = 2, heights = c(1, 1.3))
+Fig1 <- Fig1 + plot_annotation(tag_levels = 'A') & theme_fig
+Fig1 %>% saveplot(file.path(params$dir, "Figure1"), dev = "pdf",  width =  2100*1.5, height =  2970*0.8)
+```
+
+
+Figure 2: Correlation between the GAA1 repeats and FXN expression
+```{r}
+df1 <- subset(df, !is.na(GAA1))
+df1$GAA1 <- as.numeric(df1$GAA1)
+df1$FXN <- FRDA$lognorm["FXN",df1$sample]
+
+Fig2 <- ggplot(df1, aes(GAA1, FXN, label = sample)) +
+ theme_basic() + theme_fig + 
+  geom_point() +
+  geom_smooth(method = "lm",se = F,fullrange=T, color="black") +
+  stat_cor(cor.coef.name = "rho",label.x.npc = 0.75, label.y.npc = 0.95,method = "spearman") +
+  geom_text_repel() +
+  scale_x_continuous(limits = c(0,1100), expand = expansion(0,0)) +
+  scale_y_continuous(limits = c(0,6), expand = expansion(0,0)) + 
+  ylab("FXN expr.")
+
+ Fig2 %>% saveplot(file.path(params$dir, "Figure2"), dev = "pdf",  width =  2100*1.5, height =  2970*0.8)
+```
+
+
+Figure 3: Gene set enrichment analysis (FRDA)
+```{r}
+Fig3 <- FRDA$gsea_frda |> as.data.frame() |>
+  mutate(log_padj = -log10(p.adjust)*sign(NES), label = cutstr(gsub("_", " ", ID), maxchar = 80)) |>
+  ggseabar_bw(x = log_padj, label = label, labsize = 8, top_n_up = 10, top_n_down = 10, reverse = TRUE) + xlab("-log10(padj) * sign(NES)")
+
+Fig3 <- Fig3 + theme(axis.title.x = element_text(size = axis.title.fontsize, face = "plain", colour = "black"),
+                     axis.title.y = element_text(size = axis.title.fontsize, face = "plain", colour = "black"),
+                     axis.text.x = element_text(size = axis.text.fontsize, colour = "black"),
+                     axis.line.x = element_line(colour = "black"), axis.ticks.x = element_line(colour = "black"),
+                     panel.grid.major = element_line(), panel.background = element_blank())
+
+Fig3 %>% saveplot(file.path(params$dir, "Figure3"), dev = "pdf",  width =  2100*1.2, height =  2970 * 0.6)
+```
+
+
+Figure 4: Gene set enrichment analysis (EPO)
+```{r}
+Fig4 <- FRDA$gsea_epo |> as.data.frame() |>
+  mutate(log_padj = -log10(p.adjust)*sign(NES), label = cutstr(gsub("_", " ", ID), maxchar = 60)) |>
+  ggseabar_bw(x = log_padj, fill = NES, label = label, labsize = 8, top_n_up = 10, top_n_down = 10, reverse = TRUE) + xlab("-log10(padj) * sign(NES)")
+
+Fig4 <- Fig4 + theme(axis.title.x = element_text(size = axis.title.fontsize, face = "plain", colour = "black"),
+                     axis.title.y = element_text(size = axis.title.fontsize, face = "plain", colour = "black"),
+                     axis.text.x = element_text(size = axis.text.fontsize, colour = "black"),
+                     axis.line.x = element_line(colour = "black"), axis.ticks.x = element_line(colour = "black"),
+                     panel.grid.major = element_line(), panel.background = element_blank())
+
+Fig4 %>% saveplot(file.path(params$dir, "Figure4"), dev = "pdf",  width =  2100*1.2, height =  2970 * 0.6)
+```
+
+
+Figure 5: Boxplots of log-transformed normalized expression values of LEP 
+```{r}
+Fig5 <- FRDA$plots$LEP & theme_fig
+Fig5 %>% saveplot(file.path(params$dir, "Figure5"), dev = "pdf",   width =  2100*0.8, height =  2970*0.4)
+```
+
+
+Supplementary Figure 1: Heatmap of genes of interest described in the manuscript 
+```{r}
+goi <- list(
+c("BOLA3", "NFS1", "NUBP2", "GLRX3", "ISCA1", "ISCA2"), # ISC assembly
+c("CS", "IDH2", "ACO2", "PDHB", "MDH1"), # Krebs cycle
+c("IMMP1L", "MTX2", "SLC25A34", "TOMM6"), # Mitochondrial transport proteins
+c("CHCHD10", "CHCHD3", "CHCHD4", "EFHD1", "IMMT", "MICOS10", "PPIF", "SIRT3"), # Mitochondrial structural/regulatory proteins
+c("SLC25A37", "PHB2", "MFN2"), # Upregulated mitochondrial DE genes
+c("C1QBP", "ERAL1", "MRPL34", "MRPL36", "MRPL43", "MRPL44", "MRPL49", "MRPS24", "MRPS28"), # Mitochondrial ribosomes
+c("AARS2", "NARS2", "QARS1", "HARS1", "FTSJ1", "RPP14", "RPP30", "TRMT11"), # tRNA synthesis
+c("SOD2", "PRDX3", "SOD1", "GLRX", "PRDX2", "PRDX5"), # Antioxidant defense 
+c("EHMT2", "HDAC7", "TCF25", "SFMBT1", "SUDS3", "EIF2AK4", "GIGYF2", "PAIP2B"), # Repression
+c("CBR4", "ECHDC3", "IDI2", "TM7SF2", "CRLS1", "CERS6", "LEP"), # Lipid metabolism
+c("SMTNL1", "STAC3", "TNNC2", "TPM4", "ACTA1", "ADD1", "MYL1", "SGCG", "RAPSN", "TNNT3",
+  "ZBTB20", "BTBD1", "CHD2", "FRG1", "FXR1", "IGFN1", "SNAI3","COLQ", "DST",
+  "MYL5", "MYLK", "MYOM1", "TCAP", "GATM", "LDHA") # Skeletal muscle specific
+)
+
+goi <- unlist(goi)
+goi <- union(goi, subset(FRDA$deseq2_epo$results$EPOvsFRDA, padj <= 0.05)$gene)
+
+ids <- union(FRDA$deseq2_frda$results$FRDAvsCTRL$gene, FRDA$deseq2_epo$results$EPOvsFRDA$gene)
+
+lfc <- data.frame(row.names = ids,
+                  FRDAvsCTRL = FRDA$deseq2_frda$results$FRDAvsCTRL[ids,"log2FoldChange"],
+                  EPOvsFRDA = FRDA$deseq2_epo$results$EPOvsFRDA[ids,"log2FoldChange"])  
+
+padj <- data.frame(row.names = ids,
+                   FRDAvsCTRL = FRDA$deseq2_frda$results$FRDAvsCTRL[ids,"padj"],
+                   EPOvsFRDA = FRDA$deseq2_epo$results$EPOvsFRDA[ids,"padj"])  
+
+cxheatmap(lfc[unlist(goi),], title = "log2FoldChange", marksize = 3.5, cluster_cols = FALSE,
+                    heatpal = circlize::colorRamp2(c(-3,0,3),c("#0e7aed", "white", "#db3b25")),
+                    mat = padj[unlist(goi),] <= 0.05) %>%
+  saveplot(file.path(params$dir, "SuppFigure1"), dev = "pdf",  width =  2100*1.5, height =  2970 * 1.5)
+```
+

@@ -1,0 +1,82 @@
+---
+title: "02_Pathway_Analysis"
+author: "Alexander Kirchmair"
+---
+
+```{r setup}
+renv::restore()
+
+library(renv)
+library(tidyverse)
+library(DESeq2)
+library(msigdbr)
+library(fgsea)
+library(clusterProfiler)
+library(openxlsx)
+library(ggplot2)
+library(ggrepel)
+library(org.Hs.eg.db)
+
+if (!exists("envfrda")){
+  envfrda <- new.env()
+  list.files("../lib", full.names = TRUE, pattern = "^r-.*R") |>
+    sapply(source, local = envfrda) |> invisible()
+  attach(envfrda)  
+}
+
+# renv::snapshot(project = "../")
+
+dir.create("../data/FRDA_04_ANALYSIS", showWarnings = FALSE)
+```
+
+
+Data import
+```{r}
+FRDA <- readRDS(file = "../data/FRDA_04_ANALYSIS/01_FRDA.rds")
+```
+
+
+Prepare gene sets
+```{r}
+if (!file.exists("../tables/genesets.xlsx")){
+  GS <- list()
+  
+  # MSigDB
+  GS$MSigDB <- getGeneSets(c("H", "C2|CP:KEGG", "C5|GO:BP|GO:CC|GO:MF"), format = "df")
+  
+  # EPO-pathways
+  msig <- getGeneSets(collections = NULL)
+  EPO <- grep("_EPO_|erythropoietin", names(msig), ignore.case = TRUE, value = TRUE)
+  msig <- getGeneSets(collections = NULL, format = "df")
+  GS$EPO <- subset(msig, term %in% EPO)
+  
+  writeTables(GS, rowNames = FALSE, file = "../tables/genesets.xlsx")
+  
+} else {
+  GS <- readTables("../tables/genesets.xlsx", rowNames = FALSE)
+}
+```
+
+
+Run GSEA
+```{r}
+FRDA$gsea_frda <- runGSEA(data = FRDA$deseq2_frda$results$FRDAvsCTRL, genesets = GS$MSigDB)
+FRDA$gsea_epo <- runGSEA(data = FRDA$deseq2_epo$results$EPOvsFRDA, genesets = GS$MSigDB)
+```
+
+
+Check EPO pathway
+```{r}
+FRDA$EPO_gsea_epo <- runGSEA(data = FRDA$deseq2_epo$results$EPOvsFRDA, genesets = GS$EPO)
+metap::sumlog(FRDA$EPO_gsea_epo$pvalue)
+
+FRDA$EPO_gsea_frda <- runGSEA(data = FRDA$deseq2_frda$results$FRDAvsCTRL, genesets = GS$EPO)
+metap::sumlog(FRDA$EPO_gsea_frda$pvalue)
+```
+
+
+Save data
+```{r}
+saveRDS(FRDA, file = "../data/FRDA_04_ANALYSIS/02_FRDA.rds")
+```
+
