@@ -92,12 +92,6 @@ nf_summary <- function (nfdir, design = NULL, ignore = FALSE){
 
 
 
-
-
-
-
-
-
 runDESeq2 <- function(data, design = NULL, formula = ~ 1, contrasts = NULL, ctrlgenes = NULL, sizefactors = NULL,
                       alpha = 0.05, ordered = TRUE, df = TRUE, ncores = NULL,
                       shrink = TRUE, ihw = TRUE, vst = TRUE, rlog = FALSE, ...){
@@ -206,12 +200,6 @@ runDESeq2 <- function(data, design = NULL, formula = ~ 1, contrasts = NULL, ctrl
   results
   
 }
-
-
-
-
-
-
 
 
 
@@ -403,8 +391,6 @@ saveplot <- function (p, file = NULL, dev = "png", width = 3000, height = 2500, 
 
 getRanks <- function(data, rank_by = 1, type = NULL){
   
-  # Column 1 is always the main ranking, should be positive and negative
-  
   rank_by <- rlang::enquo(rank_by)
   
   
@@ -482,7 +468,6 @@ runGSEA <- function(data, genesets = NULL, rank_by = c(stat, baseMean, svalue), 
 
 
 
-
 runGSVA <- function(data, genesets = NULL, method = "gsva", kcdf = "Gaussian", ncores = 1, ...){
   
   stopifnot(requireNamespace("GSVA"))
@@ -503,60 +488,7 @@ runGSVA <- function(data, genesets = NULL, method = "gsva", kcdf = "Gaussian", n
 
 
 
-
-getHUMAN1sets <- function(type = "genes"){
-  
-  stopifnot(type %in% c("genes", "metabolites"))
-  
-  json_subsystems <- rjson::fromJSON(paste(readLines("https://metabolicatlas.org/api/v2/maps/listing?model=HumanGem"), collapse=""))
-  subsystems <- sapply(json_subsystems$subsystems, function(tmp) tmp$id )
-  subsystem_data <- lapply(setNames(subsystems, subsystems), function(tmp){
-    url <- paste0("https://metabolicatlas.org/api/v2/subsystems/", tmp,"?model=HumanGem")
-    rjson::fromJSON(paste(readLines(url, warn = FALSE), collapse=""))
-  })
-  
-  
-  if (type == "genes"){
-    HUMAN1 <- sapply(subsystem_data, function(tmp){
-      unique(unlist( sapply(tmp$genes, function(tmp2){ tmp2$name }) ))
-    })
-  }
-  
-  if (type == "metabolites"){
-    HUMAN1 <- sapply(subsystem_data, function(tmp){
-      unique(unlist( sapply(tmp$metabolites, function(tmp2){ tmp2$id }) ))
-    })
-  }
-  
-  names(HUMAN1) <- paste0("HUMAN1_", names(HUMAN1))
-  HUMAN1
-}
-
-
-
-readGTF <- function(file, columns = NULL, ...){
-  
-  gtf <- rtracklayer::import(file)
-  
-  gtf <- subset(gtf, ...)
-  
-  if (is.null(columns)){
-    columns <- c("gene_name", "seqnames", "gene_type")
-    cat(paste0("Returning columns: ", paste(columns, collapse = ", ")))
-    cat(paste0("Available columns: ", paste(colnames(as.data.frame(head(gtf))), collapse = ", ")))
-  } else if ("all" %in% tolower(columns)){
-    columns <- colnames(as.data.frame(head(gtf)))
-  }
-  
-  df <- as.data.frame(gtf)[,columns, drop = FALSE]
-  df <- dplyr::distinct(df)
-  df
-}
-
-
-
-readTables <- function (file, rowNames = TRUE, ...) 
-{
+readTables <- function(file, rowNames = TRUE, ...){
   sheets <- openxlsx::getSheetNames(file)
   res <- lapply(setNames(sheets, sheets), function(tmp) openxlsx::read.xlsx(sheet = tmp, 
                                                                             xlsxFile = file, rowNames = rowNames, ...))
@@ -606,135 +538,6 @@ convertGeneIDs <- function(ids, from = "ENTREZID", to = "SYMBOL", annotation = o
                                column = to, keytype = from, multiVals = multiVals, ...)
   res[res == "NA"] <- NA
   res
-}
-
-
-
-cxheatmap <- function (data, rowdf = NULL, coldf = NULL, scale = FALSE, cluster_rows = NULL, 
-          cluster_cols = NULL, rowdf_side = "left", coldf_side = "top", 
-          rowdf_legend = TRUE, coldf_legend = TRUE, legend_border = "black", 
-          anno_border = "black", fontsize = 12, rowcex = NULL, colcex = 1, 
-          rownames_width = 0.3, colnames_width = 0.3, heatpal = NULL, 
-          border = NULL, title = NULL, colors = NULL, inf = F, na = 0, 
-          mat = NULL, markoob = FALSE, markshape = 4, marksize = NULL, 
-          na_col = "grey", maxchar = 35, ...){
-  
-  datacall <- substitute(data)
-  if (is.null(title)) {
-    if (grepl("row|col", scale, ignore.case = TRUE)) {
-      title <- "z-score"
-    }
-    else {
-      title <- deparse1(datacall)
-    }
-  }
-  if (title == FALSE) 
-    title <- " "
-  heatdata <- eval(datacall, envir = parent.frame())
-  heatdata <- data.matrix(heatdata)
-  heatdata <- matScale(heatdata, rows = grepl("row", scale, 
-                                              ignore.case = TRUE), cols = grepl("col", scale, ignore.case = TRUE))
-  clust <- clusterData(heatdata, rows = cluster_rows, cols = cluster_cols, 
-                       inf = inf, na = na)
-  if (is.null(clust$rows)) 
-    clust$rows <- FALSE
-  if (is.null(clust$cols)) 
-    clust$cols <- FALSE
-  if (is.null(heatpal)) {
-    heatpal_colors <- getColorScale(heatdata)
-    heatpal <- circlize::colorRamp2(breaks = heatpal_colors, 
-                                    colors = names(heatpal_colors))
-  }
-  docol <- setdiff(unlist(lapply(list(coldf, rowdf), colnames)), 
-                   names(colors))
-  addcol <- NULL
-  if (length(docol) > 0) {
-    if (!is.null(coldf)) 
-      all <- coldf
-    if (!is.null(rowdf)) 
-      all <- rowdf
-    if (!is.null(coldf) & !is.null(rowdf)) 
-      all <- dplyr::full_join(coldf, rowdf, by = character())
-    addcol <- getColors(all[, docol, drop = FALSE])
-  }
-  colors <- c(colors, addcol)
-  colors <- lapply(colors, function(tmp) tmp[!is.na(tmp) & 
-                                               !is.na(names(tmp))])
-  if (is.null(border)) {
-    if (nrow(heatdata) < 100 & ncol(heatdata) < 100) {
-      border <- grid::gpar(col = rgb(1, 1, 1), lwd = grid::unit(1, 
-                                                                "pt"))
-    }
-    else {
-      border <- grid::gpar(col = NA)
-    }
-  }
-  else {
-    if (any(border == TRUE)) {
-      border <- grid::gpar(col = rgb(1, 1, 1), lwd = grid::unit(1, 
-                                                                "pt"))
-    }
-    else if (length(border) > 1) {
-      border <- grid::gpar(col = border[is.na(as.numeric(border))], 
-                           lwd = grid::unit(as.numeric(border)[!is.na(as.numeric(border))], 
-                                            "pt"))
-    }
-    else {
-      border <- grid::gpar(col = NA)
-    }
-  }
-  legend_params <- list(title_gp = grid::gpar(fontsize = fontsize, 
-                                              fontface = "bold"), legend_height = grid::unit(0.2, "npc"), 
-                        border = legend_border, labels_gp = grid::gpar(fontsize = fontsize))
-  rowAnn <- NULL
-  if (!is.null(rowdf)) 
-    rowAnn <- getCXanno(df = rowdf[rownames(heatdata), , 
-                                   drop = FALSE], colors = colors, anno_border = anno_border, 
-                        side = rowdf_side, legend = rowdf_legend, legend_params = legend_params)
-  colAnn <- NULL
-  if (!is.null(coldf)) 
-    colAnn <- getCXanno(coldf[colnames(heatdata), , drop = FALSE], 
-                        colors = colors, anno_border = anno_border, side = coldf_side, 
-                        legend = coldf_legend, legend_params = legend_params)
-  if (markoob == TRUE & is.null(mat)) {
-    mat <- matrix(data = FALSE, nrow = nrow(heatdata), ncol = ncol(heatdata), 
-                  dimnames = dimnames(heatdata))
-    mat[heatdata < min(heatpal_colors)] <- TRUE
-    mat[heatdata > max(heatpal_colors)] <- TRUE
-  }
-  if (is.null(marksize)) 
-    marksize <- fontsize * 0.6
-  cellFUN <- NULL
-  if (!is.null(mat)) {
-    if (!is.logical(mat)) 
-      stop("'Mat' must be a logical indicator of whether cells should be marked!")
-    cellmat <- mat[rownames(heatdata), colnames(heatdata)]
-    cellFUN <- function(j, i, x, y, width, height, fill) {
-      if (naf(cellmat[i, j] == TRUE)) {
-        grid::grid.points(x, y, pch = markshape, size = unit(marksize, 
-                                                             "pt"))
-      }
-    }
-  }
-  dimnames(heatdata) <- lapply(dimnames(heatdata), function(x) cutstr(x, 
-                                                                      maxchar = maxchar))
-  if (is.null(rowcex) & nrow(heatdata) > 10 * ncol(heatdata)) 
-    rowcex <- 1/log10(nrow(heatdata))
-  if (is.null(rowcex)) 
-    rowcex <- 1
-  if (is.null(colcex)) 
-    colcex <- 1
-  hm <- ComplexHeatmap::Heatmap(name = title, matrix = heatdata, 
-                                row_names_max_width = grid::unit(rownames_width, "npc"), 
-                                column_names_max_height = grid::unit(colnames_width, 
-                                                                     "npc"), column_title_gp = grid::gpar(fontsize = fontsize, 
-                                                                                                          fontface = "bold"), rect_gp = border, na_col = na_col, 
-                                left_annotation = rowAnn, top_annotation = colAnn, row_names_gp = grid::gpar(fontsize = fontsize * 
-                                                                                                               rowcex), column_names_gp = grid::gpar(fontsize = fontsize * 
-                                                                                                                                                       colcex), col = heatpal, heatmap_legend_param = legend_params, 
-                                cluster_rows = clust$rows, cluster_columns = clust$cols, 
-                                cell_fun = cellFUN, ...)
-  hm
 }
 
 

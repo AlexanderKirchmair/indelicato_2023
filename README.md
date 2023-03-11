@@ -25,8 +25,7 @@ Poly-A and quality trimming
 source preprocessing/trimming.sh
 ```
 
-Run the [nf-core/rnaseq](https://nf-co.re/rnaseq/3.6) pipeline
-Parameters and reference genome paths can be set in 'preprocessing/nf.config'
+Run the [nf-core/rnaseq](https://nf-co.re/rnaseq/3.6) pipeline (parameters and reference genome paths can be set in 'preprocessing/nf.config')
 ```bash
 source preprocessing/preprocessing.sh
 ```

@@ -218,9 +218,9 @@ padj <- data.frame(row.names = ids,
                    FRDAvsCTRL = FRDA$deseq2_frda$results$FRDAvsCTRL[ids,"padj"],
                    EPOvsFRDA = FRDA$deseq2_epo$results$EPOvsFRDA[ids,"padj"])  
 
-cxheatmap(lfc[unlist(goi),], title = "log2FoldChange", marksize = 3.5, cluster_cols = FALSE,
+cxheatmap(lfc[goi,], title = "log2FoldChange", marksize = 3.5, cluster_cols = FALSE,
                     heatpal = circlize::colorRamp2(c(-3,0,3),c("#0e7aed", "white", "#db3b25")),
-                    mat = padj[unlist(goi),] <= 0.05) %>%
+                    mat = padj[goi,] <= 0.05) %>%
   saveplot(file.path(params$dir, "SuppFigure1"), dev = "pdf",  width =  2100*1.5, height =  2970 * 1.5)
 ```
 
